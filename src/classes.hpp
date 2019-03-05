@@ -33,12 +33,6 @@ namespace net = boost::asio;            // from <boost/asio.hpp>
 using tcp = boost::asio::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
 
 
-struct thread_guard{
-    std::string strToSend;
-    bool strChanged = false;
-    bool strSent = false;
-};
-
 struct WebSockets_Callback_Error {
     std::string message = "";
     beast::error_code error;
@@ -51,7 +45,6 @@ struct WebSockets_Callback_onEvents {
     
     std::function<void(const std::string, const void* conn)> preOnMessage;
     std::function<void(const json, const void* conn)> onUnexpectedMessage;
-    std::function<void(const std::string)> onMessage;
     
     std::function<void(WebSockets_Callback_Error)> onError;
     std::function<void()> onClose;
@@ -83,7 +76,7 @@ struct WebSockets_Callback_Options {
     std::list<int> *MIDIEvents;
     WebSockets_Callback_onEvents callbacks;
     
-    thread_guard* tg;
+    RubberArray<std::string>* strQueue;
 };
 
 

@@ -337,7 +337,7 @@ public:
     }
     
     void on_handshake(beast::error_code ec){
-        //cout << "\n" <<  "======== on_handshake()";
+        cout << "\n" <<  "======== on_handshake()";
         
         options.callbacks.error.error = ec;
         
@@ -378,11 +378,12 @@ public:
     }
     
     void reset(){
-        
-        if (options.tg->strToSend.length() > 0){
-            //cout << "\n" << "[WS] Sending message: " << options.tg->strToSend.c_str();
-            this->send_str(options.tg->strToSend);
-            options.tg->strToSend = "";
+        if (options.strQueue->length() > 0){
+            for (int i = options.strQueue->length() - 1; i > -1; i--){
+                RubberArray<std::string> q = *options.strQueue;
+                this->send_str(q[i]);
+                options.strQueue->remove(i);
+            }
         }
         
         this->wait_for_read();

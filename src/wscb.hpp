@@ -46,7 +46,7 @@ private:
     std::string ws_types [2]; //0 = "#s", 1 = "#c"
     
     void server_thread(WebSockets_Callback_Options options){
-        cout << "\n" <<  "WebSockets_Callback_Options::server_thread()";
+        //cout << "\n" <<  "WebSockets_Callback_Options::server_thread()";
         
         net::io_context ioc{options.threads};
         
@@ -67,24 +67,24 @@ private:
     }
     
     void client_thread(WebSockets_Callback_Options options){
-        cout << "\n" <<  "WebSockets_Callback_Options::client_thread()";
+        //cout << "\n" <<  "WebSockets_Callback_Options::client_thread()";
         
         net::io_context ioc;
         auto wsc = std::make_shared<ws_client_session>(ioc);
         wsc->run(options);
         ioc.run();
         
-        for(;;){
+        /*for(;;){
             if (options.tg->strToSend.length() > 0){
-                cout << "\n" << "[WS] Sending message: " << options.tg->strToSend.c_str();
+                //cout << "\n" << "[WS] Sending message: " << options.tg->strToSend.c_str();
                 wsc->send_str(options.tg->strToSend);
                 options.tg->strToSend = "";
             }
-        }
+        }*/
     }
     
     void server_start(){
-        cout << "\n" << "%s %s %s %i %s %i %s" << "Attempting to start WebSocket server @ " << options.address.c_str() << ":" << options.port << " using " << options.threads, " threads...";
+        cout << "\n" << "Attempting to start WebSocket server @ " << options.address.c_str() << ":" << options.port << " using " << options.threads << " threads...";
         
         ws_types[0] = "#s";
         ws_types[1] = "#c";
@@ -98,7 +98,7 @@ private:
     }
     
     void client_connect(){
-        cout << "\n" << "%s %s %s %i" << "Attempting to connect to WebSocket server @ " << options.address.c_str() << ":" << options.port;
+        //cout << "\n" << "%s %s %s %i" << "Attempting to connect to WebSocket server @ " << options.address.c_str() << ":" << options.port;
         
         ws_types[0] = "#c";
         ws_types[1] = "#s";
@@ -156,26 +156,21 @@ private:
         
         if (trigger == NULL) return;
         
-        trigger->doHandle(json_, [this](json response) -> void{
-            cout << "Sending response!";
-            this->simple("RESPONSE", "HELLOOOO", *options.tg, NULL);
-            /*json_["cmd"].get<std::string>()
-            if (json_["cmd"].puid == NULL) response.json_["cmd"] = json.puid;
-            t.send(response, undefined, undefined, conn);
-            if (this->onResponselessMessage != 0) this->onResponselessMessage();*/
+        trigger->doHandle(json_, [this, json_](json response) -> void{
+            this->send(response);
         });
     }
 public:
     WebSockets_Callback(){
-        
+        options.strQueue = new RubberArray<std::string>();
     }
     
     ~WebSockets_Callback(){
-         cout << "\n" <<  "Destroying WebSockets_Callback object...";
+         //cout << "\n" <<  "Destroying WebSockets_Callback object...";
     }
     
     void start(){
-        cout << "\n" <<  "Setting preOnMessage()";
+        //cout << "\n" <<  "Setting preOnMessage()";
         options.callbacks.preOnMessage = [this](const std::string msg, const void* conn) -> void{
             this->preOnMessage(msg, conn);
         };
@@ -192,12 +187,12 @@ public:
         cout << "\n" <<  "Stopping WebSocket...";
     }
     
-    void send(std::string command, std::string message, thread_guard& tgAddr, std::function<void()> onResponse = NULL, std::function<void()> onProgress = NULL){
-        options.tg->strToSend = *new std::string("{\"cmd\": \"" + command + "\", \"msg\": \"" + message + "\"}");
+    void send(json json_, std::function<void(json)> onResponse = NULL, std::function<void(json)> onProgress = NULL){
+        options.strQueue->add(json_.dump());
     }
     
-    void simple(std::string command, std::string message, thread_guard& tgAddr, std::function<void()> onResponse = NULL){
-        this->send(command, message, tgAddr, onResponse);
+    void simple(std::string command, std::function<void()> onResponse = NULL){
+        options.strQueue->add("{\"cmd\": \"" + command + "\"}");
     }
     
     void on(std::string command, std::function<void(const json, std::function<void(const json)>)> doHandle){
