@@ -1,5 +1,5 @@
 # websockets-callback.cpp
-A C++ port of my library WebSockets-Callback library.
+A C++ port of my JS library [WebSockets-Callback](https://github.com/aidv/websockets-callback).
 
 ### IMPORTANT
 This C++ library most likely infested with TONS of bugs.
@@ -7,8 +7,11 @@ Help me kill the bugs 🕷
 
 ### DEPENDENCIES
 [Boost](https://github.com/boostorg/boost)
+
 [Beast](https://github.com/boostorg/beast/)
+
 [Nlohmann JSON](https://github.com/nlohmann/json)
+
 [Nemimccarter rubberArray](https://github.com/nemimccarter/rubberArray)
 
 ### Introduction
