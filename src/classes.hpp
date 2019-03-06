@@ -19,8 +19,6 @@
 #include <thread>
 #include <mutex>
 
-#include "rubberarray/RubberArray.h"
-
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -57,14 +55,14 @@ struct WebSockets_Callback_onEvents {
     void triggerOnUnexpectedMessage(const json json_, const void* conn){ if (this->onUnexpectedMessage != 0) this->onUnexpectedMessage(json_, conn); }
     
     
-    void triggerOnError(){if (this->onError != 0) this->onError(this->error); }
-    
-    void triggerOnError(std::string msg){
-        this->error.message = msg;
-        triggerOnError();
+    void triggerOnError(std::string message){
+        if (this->onError != 0){
+            this->error.message = message;
+            this->onError(this->error);
+        }
     }
     
-    void triggerOnClose(){ this->onClose(); }
+    void triggerOnClose(){if (this->onClose != 0) this->onClose(); }
     
 };
 
@@ -76,7 +74,7 @@ struct WebSockets_Callback_Options {
     std::list<int> *MIDIEvents;
     WebSockets_Callback_onEvents callbacks;
     
-    RubberArray<std::string>* strQueue;
+    std::vector<std::string>* strQueue;
 };
 
 
@@ -101,26 +99,25 @@ struct WebSockets_Callback_Trigger{
 
 class WebSockets_Callback_Triggers{
 public:
-    RubberArray<WebSockets_Callback_Trigger*> elements;
+    std::vector<WebSockets_Callback_Trigger*> elements;
     void add(
              std::string cmd,
              std::function<void(const json, std::function<void(const json)>)> doHandle = NULL,
              std::function<void(const json)> onResponse = NULL,
              std::function<void(const json)> onProgress = NULL){
         
-        WebSockets_Callback_Trigger* trigger;
-        trigger = new WebSockets_Callback_Trigger();
+        WebSockets_Callback_Trigger* trigger = new WebSockets_Callback_Trigger();
         trigger->command = cmd;
         
         if (doHandle   != 0) trigger->doHandle   = doHandle;
         if (onResponse != 0) trigger->onResponse = onResponse;
         if (onProgress != 0) trigger->onProgress = onProgress;
         
-        elements.append(trigger);
+        elements.push_back(trigger);
     }
     
     int indexOfPUID(std::string puid){
-        for (int i = 0; i < elements.length(); i++)
+        for (int i = 0; i < elements.size(); i++)
             if (elements[i]->puid == puid)
                 return i;
         
@@ -128,7 +125,7 @@ public:
     }
     
     WebSockets_Callback_Trigger* getByPUID(std::string id){
-        for (int i = 0; i < elements.length(); i++)
+        for (int i = 0; i < elements.size(); i++)
             if (elements[i]->puid == id)
                 return elements[i];
         
@@ -136,7 +133,7 @@ public:
     }
     
     int indexOfCommand(std::string cmd){
-        for (int i = 0; i < elements.length(); i++)
+        for (int i = 0; i < elements.size(); i++)
             if (elements[i]->command == cmd)
                 return i;
         
@@ -144,7 +141,7 @@ public:
     }
     
     WebSockets_Callback_Trigger* getByCommand(std::string cmd){
-        for (int i = 0; i < elements.length(); i++)
+        for (int i = 0; i < elements.size(); i++)
             if (elements[i]->command == cmd)
                 return elements[i];
         

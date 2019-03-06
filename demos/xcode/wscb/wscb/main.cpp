@@ -1,5 +1,11 @@
 #include "src/wscb.hpp"
 
+#include <boost/asio.hpp>
+#include <boost/bind.hpp>
+#include <boost/function.hpp>
+#include <boost/chrono.hpp>
+#include <boost/chrono/duration.hpp>
+#include <boost/function.hpp>
 
 namespace ns {
     struct person {
@@ -19,6 +25,14 @@ namespace ns {
     }
 };
 
+void sendTest(const boost::system::error_code& e, WebSockets_Callback* wscb)
+{
+    wscb->simple("\"cmd\": \"testing\"");//, [&](json json_) -> void{
+    //    std::cout << "Response: " << json_.dump();
+    //});}
+}
+
+
 int main(int argc, char** argv)
 {
     bool connected = true;
@@ -28,27 +42,27 @@ int main(int argc, char** argv)
     wscb->options.address = "192.168.1.5";
     
     wscb->options.callbacks.onOpen = [wscb]() -> void{
-        cout << "\n[WS] Connection opened!";
+        std::cout << "\n[WS] Connection opened!";
     };
     
     //uncomment "onListening" to start a WebSocket server instead
     /*wscb->options.callbacks.onListening = []() -> void{
-        cout << "[WS] Server listening! \n";
+        std::cout << "[WS] Server listening! \n";
     };*/
     
     wscb->options.callbacks.onError = [](WebSockets_Callback_Error error) -> void{
-        cout << "[WS] Error: " << error.message.c_str() << "\n";
+        std::cout << "[WS] Error: " << error.message<< ": " << error.error.message() << "\n";
     };
     
     wscb->options.callbacks.onClose = [&connected]() -> void{
-        cout << "[WS] Session closed: <reason> \n";
+        std::cout << "[WS] Session closed: <reason> \n";
         connected = false;
     };
     
     
     
     wscb->options.callbacks.onUnexpectedMessage = [](const json json_, const void* conn) -> void{
-        cout << "[WS] Unexpected message: " << json_.dump() << "\n";
+        std::cout << "[WS] Unexpected message: " << json_.dump() << "\n";
         
         //Unexpected message = Server sent a message and is NOT expecting a response
     };
@@ -56,10 +70,16 @@ int main(int argc, char** argv)
     wscb->on(
         "Test", //if the command "Test" is received, the lambda below will be executed.
         [](json json_, std::function<void(const json)> respondWith) -> void{
-            cout << "[WS] Responding to expectation 'TEST' with it's own message. \n";
+            std::cout << "[WS] Responding to expectation 'TEST' with it's own message. \n";
             respondWith(json_);
         }
     );
+    
+    
+
+    wscb->simple("testing", [](json json_) -> void{
+        std::cout << "Response: " << json_.dump();
+    });
     
     wscb->start();
     

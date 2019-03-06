@@ -17,8 +17,6 @@
 #include <thread>
 #include <mutex>
 
-#include "rubberarray/RubberArray.h"
-
 #include <nlohmann/json.hpp>
 
 #include "src/ws.hpp"
@@ -84,7 +82,7 @@ private:
     }
     
     void server_start(){
-        cout << "\n" << "Attempting to start WebSocket server @ " << options.address.c_str() << ":" << options.port << " using " << options.threads << " threads...";
+        std::cout << "\n" << "Attempting to start WebSocket server @ " << options.address.c_str() << ":" << options.port << " using " << options.threads << " threads...";
         
         ws_types[0] = "#s";
         ws_types[1] = "#c";
@@ -114,7 +112,7 @@ private:
         
         try{ json_ = json::parse(msg.c_str());
         } catch (std::invalid_argument & invalid){
-            cout << "\n" << "Error reading JSON " << invalid.what();
+            std::cout << "\n" << "Error reading JSON " << invalid.what();
             return;
         }
         
@@ -144,7 +142,7 @@ private:
         if (expectation != NULL){
             if (json_["progress"] == NULL || json_["progress"].get<std::string>() == "100"){
                 expectation->onResponse(json_);
-                expectations.elements.remove(expectationIndex);
+                expectations.elements.erase(expectations.elements.begin() + expectationIndex);
             } else {
                 expectation->onProgress(json_);
             }
@@ -162,7 +160,7 @@ private:
     }
 public:
     WebSockets_Callback(){
-        options.strQueue = new RubberArray<std::string>();
+        options.strQueue = new std::vector<std::string>();
     }
     
     ~WebSockets_Callback(){
@@ -184,15 +182,15 @@ public:
     }
     
     void stop(){
-        cout << "\n" <<  "Stopping WebSocket...";
+        std::cout << "\n" <<  "Stopping WebSocket...";
     }
     
     void send(json json_, std::function<void(json)> onResponse = NULL, std::function<void(json)> onProgress = NULL){
-        options.strQueue->add(json_.dump());
+        options.strQueue->push_back(json_.dump());
     }
     
-    void simple(std::string command, std::function<void()> onResponse = NULL){
-        options.strQueue->add("{\"cmd\": \"" + command + "\"}");
+    void simple(std::string command, std::function<void(json)> onResponse = NULL){
+        options.strQueue->push_back("{\"cmd\": \"" + command + "\"}");
     }
     
     void on(std::string command, std::function<void(const json, std::function<void(const json)>)> doHandle){

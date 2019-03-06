@@ -19,8 +19,6 @@
 #include <thread>
 #include <mutex>
 
-#include "rubberarray/RubberArray.h"
-
 #include "src/classes.hpp"
 
 #include <nlohmann/json.hpp>
@@ -97,7 +95,6 @@ public:
         }
         
         if(ec){
-           ;//fail(ec, "read");
             options.callbacks.triggerOnError("read");
         }
         
@@ -337,7 +334,7 @@ public:
     }
     
     void on_handshake(beast::error_code ec){
-        cout << "\n" <<  "======== on_handshake()";
+        //cout << "\n" <<  "======== on_handshake()";
         
         options.callbacks.error.error = ec;
         
@@ -378,11 +375,11 @@ public:
     }
     
     void reset(){
-        if (options.strQueue->length() > 0){
-            for (int i = options.strQueue->length() - 1; i > -1; i--){
-                RubberArray<std::string> q = *options.strQueue;
+        if (options.strQueue->size() > 0){
+            for (int i = options.strQueue->size() - 1; i > -1; i--){
+                std::vector<std::string> q = *options.strQueue;
                 this->send_str(q[i]);
-                options.strQueue->remove(i);
+                options.strQueue->erase(options.strQueue->begin() + i);
             }
         }
         
