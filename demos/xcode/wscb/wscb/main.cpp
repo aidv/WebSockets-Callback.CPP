@@ -1,48 +1,38 @@
+#include <thread>
+#include <chrono>
+
 #include "src/wscb.hpp"
 
-#include <boost/asio.hpp>
-#include <boost/bind.hpp>
-#include <boost/function.hpp>
-#include <boost/chrono.hpp>
-#include <boost/chrono/duration.hpp>
-#include <boost/function.hpp>
+WebSockets_Callback* wscb = new WebSockets_Callback;
 
-namespace ns {
-    struct person {
-        std::string name;
-        std::string address;
-        int age;
-    };
-    
-    void to_json(json& j, const person& p) {
-        j = json{{"name", p.name}, {"address", p.address}, {"age", p.age}};
+void timerFunc(){
+    int i = 0;
+    for (;;){
+        wscb->simple("Test " + std::to_string(i));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        i++;
     }
-    
-    void from_json(const json& j, person& p) {
-        j.at("name").get_to(p.name);
-        j.at("address").get_to(p.address);
-        j.at("age").get_to(p.age);
-    }
-};
-
-void sendTest(const boost::system::error_code& e, WebSockets_Callback* wscb)
-{
-    wscb->simple("\"cmd\": \"testing\"");//, [&](json json_) -> void{
-    //    std::cout << "Response: " << json_.dump();
-    //});}
 }
+
 
 
 int main(int argc, char** argv)
 {
-    bool connected = true;
     
-    WebSockets_Callback* wscb = new WebSockets_Callback;
     
-    wscb->options.address = "192.168.1.5";
+    wscb->options->asClient = true;
+    wscb->options->address = "192.168.1.5";
     
-    wscb->options.callbacks.onOpen = [wscb]() -> void{
-        std::cout << "\n[WS] Connection opened!";
+    wscb->options->callbacks.onOpen = [](void* conn) -> void{
+        std::cout << "[WS] Connection opened!" << std::endl;
+        
+        wscb->simple("testing", [](json json_) -> void{
+            std::cout << "Response: " << json_.dump() << std::endl;
+        }, conn);
+        
+        //start a timer thread that sends a message to the server/clients every second.
+        std::thread thread = std::thread([]() {timerFunc();});
+        thread.detach();
     };
     
     //uncomment "onListening" to start a WebSocket server instead
@@ -50,41 +40,51 @@ int main(int argc, char** argv)
         std::cout << "[WS] Server listening! \n";
     };*/
     
-    wscb->options.callbacks.onError = [](WebSockets_Callback_Error error) -> void{
-        std::cout << "[WS] Error: " << error.message<< ": " << error.error.message() << "\n";
+    wscb->options->callbacks.onError = [](WSCB_Error error) -> void{
+        std::cout << "[WS] Error: " << error.message<< ": " << error.error.message() << std::endl;
     };
     
-    wscb->options.callbacks.onClose = [&connected]() -> void{
-        std::cout << "[WS] Session closed: <reason> \n";
-        connected = false;
+    wscb->options->callbacks.onClose = []() -> void{
+        std::cout << "[WS] Session closed: <reason>" << std::endl;
     };
     
     
     
-    wscb->options.callbacks.onUnexpectedMessage = [](const json json_, const void* conn) -> void{
-        std::cout << "[WS] Unexpected message: " << json_.dump() << "\n";
+    wscb->options->callbacks.onUnexpectedMessage = [](const json json_, const void* conn) -> void{
+        std::cout << "[WS] Unexpected message: " << json_.dump() << std::endl;
         
         //Unexpected message = Server sent a message and is NOT expecting a response
     };
     
     wscb->on(
-        "Test", //if the command "Test" is received, the lambda below will be executed.
+        "test", //if the command "test" is received, the lambda below will be executed.
         [](json json_, std::function<void(const json)> respondWith) -> void{
-            std::cout << "[WS] Responding to expectation 'TEST' with it's own message. \n";
+            std::cout << "[WS] Responding to expectation 'testing' with it's own message." << std::endl;
             respondWith(json_);
         }
     );
     
-    
-
-    wscb->simple("testing", [](json json_) -> void{
-        std::cout << "Response: " << json_.dump();
-    });
+    wscb->on(
+        "progress", //if the command "test" is received, the lambda below will be executed.
+        [](json json_, std::function<void(const json)> respondWith) -> void{
+            std::cout << "[WS] Testing progress..." << std::endl;
+            
+            json json__ = json::parse(json_.dump());
+            
+            for (int i = 0; i <= 10; i++){
+                json__["progress"] = std::to_string(i);
+                respondWith(json__);
+            }
+        }
+    );
     
     wscb->start();
     
     
-    while (connected){}
+    
+    
+    std::cout << "Press any key to continue..." << std::endl;
+    std::cin.get();
     
     
     return EXIT_SUCCESS;

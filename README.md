@@ -20,24 +20,46 @@ by exposing simple functions that do specific jobs and that do them very well.
 - Non-blocking multithreading
 - Easy to use
 
+### KNOWN ISSUES
+- Server session async_read reports "Operation canceled" when all clients have disconnected. To be fixed.
+
 ### Usage
 
 ### XCode
 Check the XCode demo project.
 
 ```js
+#include <thread>
+#include <chrono>
+
 #include "src/wscb.hpp"
+
+WebSockets_Callback* wscb = new WebSockets_Callback;
+
+void timerFunc(){
+    int i = 0;
+    for (;;){
+        wscb->simple("Test " + std::to_string(i));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        i++;
+    }
+}
+
+
 
 int main(int argc, char** argv)
 {
-    bool connected = true;
     
-    WebSockets_Callback* wscb = new WebSockets_Callback;
     
+    //wscb->options.asClient = true;
     wscb->options.address = "192.168.1.5";
     
-    wscb->options.callbacks.onOpen = [wscb]() -> void{
-        std::cout << "\n[WS] Connection opened!";
+    wscb->options.callbacks.onOpen = [](void* conn) -> void{
+        std::cout << "[WS] Connection opened!" << std::endl;
+        
+        wscb->simple("testing", [](json json_) -> void{
+            std::cout << "Response: " << json_.dump() << std::endl;
+        }, conn);
     };
     
     //uncomment "onListening" to start a WebSocket server instead
@@ -45,41 +67,52 @@ int main(int argc, char** argv)
         std::cout << "[WS] Server listening! \n";
     };*/
     
-    wscb->options.callbacks.onError = [](WebSockets_Callback_Error error) -> void{
-        std::cout << "[WS] Error: " << error.message<< ": " << error.error.message() << "\n";
+    wscb->options.callbacks.onError = [](WSCB_Error error) -> void{
+        std::cout << "[WS] Error: " << error.message<< ": " << error.error.message() << std::endl;
     };
     
-    wscb->options.callbacks.onClose = [&connected]() -> void{
-        std::cout << "[WS] Session closed: <reason> \n";
-        connected = false;
+    wscb->options.callbacks.onClose = []() -> void{
+        std::cout << "[WS] Session closed: <reason>" << std::endl;
     };
     
     
     
     wscb->options.callbacks.onUnexpectedMessage = [](const json json_, const void* conn) -> void{
-        std::cout << "[WS] Unexpected message: " << json_.dump() << "\n";
+        std::cout << "[WS] Unexpected message: " << json_.dump() << std::endl;
         
         //Unexpected message = Server sent a message and is NOT expecting a response
     };
     
     wscb->on(
-        "Test", //if the command "Test" is received, the lambda below will be executed.
+        "test", //if the command "test" is received, the lambda below will be executed.
         [](json json_, std::function<void(const json)> respondWith) -> void{
-            std::cout << "[WS] Responding to expectation 'TEST' with it's own message. \n";
+            std::cout << "[WS] Responding to expectation 'testing' with it's own message." << std::endl;
             respondWith(json_);
         }
     );
     
-    
-
-    wscb->simple("testing", [](json json_) -> void{
-        std::cout << "Response: " << json_.dump();
-    });
+    wscb->on(
+        "progress", //if the command "test" is received, the lambda below will be executed.
+        [](json json_, std::function<void(const json)> respondWith) -> void{
+            std::cout << "[WS] Testing progress..." << std::endl;
+            
+            json json__ = json::parse(json_.dump());
+            
+            for (int i = 0; i <= 10; i++){
+                json__["progress"] = std::to_string(i);
+                respondWith(json__);
+            }
+        }
+    );
     
     wscb->start();
     
     
-    while (connected){}
+    std::thread thread = std::thread([]() {timerFunc();});
+    thread.detach();
+    
+    std::cout << "Press any key to continue...";
+    std::cin.get();
     
     
     return EXIT_SUCCESS;
@@ -94,5 +127,10 @@ You can contribute in any way you want;
 - Open new issues and report bugs or suggest improvements
 - Ask questions so I can add information to the README file
 
+### CREDITS
+
+- [gmbeard](https://github.com/gmbeard) - Suggested to replace rubberArray with std::vector.
+- [vinniefalco](https://github.com/vinniefalco/) - Gave some recognition. I'll use it as a "stamp of approval" since this library is heavily relying on his Boost library.
+- You. For using/contributing/sharing my library.
 
 Star this repository on github, please. Thank you.

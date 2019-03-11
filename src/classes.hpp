@@ -31,27 +31,27 @@ namespace net = boost::asio;            // from <boost/asio.hpp>
 using tcp = boost::asio::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
 
 
-struct WebSockets_Callback_Error {
+struct WSCB_Error {
     std::string message = "";
     beast::error_code error;
 };
 
-struct WebSockets_Callback_onEvents {
-    WebSockets_Callback_Error error;
+struct WSCB_Callbacks {
+    WSCB_Error error;
     std::function<void()> onListening = NULL ;
-    std::function<void()> onOpen;
+    std::function<void(void*)> onOpen;
     
-    std::function<void(const std::string, const void* conn)> preOnMessage;
-    std::function<void(const json, const void* conn)> onUnexpectedMessage;
+    std::function<void(std::string*, const void*)> preOnMessage;
+    std::function<void(const json, const void*)> onUnexpectedMessage;
     
-    std::function<void(WebSockets_Callback_Error)> onError;
+    std::function<void(WSCB_Error)> onError;
     std::function<void()> onClose;
     
-    void triggerOnOpen(){ if (this->onOpen != 0) this->onOpen(); }
+    void triggerOnOpen(void* conn = NULL){ if (this->onOpen != 0) this->onOpen(conn); }
     
     void triggerOnListening(){ if (this->onListening != 0) this->onListening(); }
     
-    void triggerPreOnMessage(std::string msg, void* conn){ if (this->preOnMessage != 0) this->preOnMessage(msg, conn); }
+    void triggerPreOnMessage(std::string* msg, void* conn){ if (this->preOnMessage != 0) this->preOnMessage(msg, conn); }
     void triggerOnUnexpectedMessage(const json json_, const void* conn){ if (this->onUnexpectedMessage != 0) this->onUnexpectedMessage(json_, conn); }
     
     
@@ -66,22 +66,23 @@ struct WebSockets_Callback_onEvents {
     
 };
 
-struct WebSockets_Callback_Options {
-    bool server = true;
+struct WSCB_Options {
+    bool asClient = false;
+    //bool verbose = false;
     std::string address = "127.0.0.1";
     int port = 8081;
     int threads = 1;
-    std::list<int> *MIDIEvents;
-    WebSockets_Callback_onEvents callbacks;
+    WSCB_Callbacks callbacks;
     
-    std::vector<std::string>* strQueue;
+    std::vector<void*>* wsClientSessions;
+    void* clientSession = NULL;
 };
 
 
 
 
 
-struct WebSockets_Callback_Message {
+struct WSCB_Message {
     std::string cmd = "";
     std::string puid = "";
 };
@@ -89,7 +90,7 @@ struct WebSockets_Callback_Message {
 
 /**********/
 
-struct WebSockets_Callback_Trigger{
+struct WSCB_Trigger{
     std::string puid;
     std::string command;
     std::function<void(const json, std::function<void(const json)>)> doHandle;
@@ -97,16 +98,16 @@ struct WebSockets_Callback_Trigger{
     std::function<void(const json)> onProgress;
 };
 
-class WebSockets_Callback_Triggers{
+class WSCB_Triggers{
 public:
-    std::vector<WebSockets_Callback_Trigger*> elements;
-    void add(
+    std::vector<WSCB_Trigger*> elements;
+    WSCB_Trigger* add(
              std::string cmd,
              std::function<void(const json, std::function<void(const json)>)> doHandle = NULL,
              std::function<void(const json)> onResponse = NULL,
              std::function<void(const json)> onProgress = NULL){
         
-        WebSockets_Callback_Trigger* trigger = new WebSockets_Callback_Trigger();
+        WSCB_Trigger* trigger = new WSCB_Trigger();
         trigger->command = cmd;
         
         if (doHandle   != 0) trigger->doHandle   = doHandle;
@@ -114,6 +115,8 @@ public:
         if (onProgress != 0) trigger->onProgress = onProgress;
         
         elements.push_back(trigger);
+        
+        return trigger;
     }
     
     int indexOfPUID(std::string puid){
@@ -124,7 +127,7 @@ public:
         return -1;
     }
     
-    WebSockets_Callback_Trigger* getByPUID(std::string id){
+    WSCB_Trigger* getByPUID(std::string id){
         for (int i = 0; i < elements.size(); i++)
             if (elements[i]->puid == id)
                 return elements[i];
@@ -140,13 +143,11 @@ public:
         return -1;
     }
     
-    WebSockets_Callback_Trigger* getByCommand(std::string cmd){
+    WSCB_Trigger* getByCommand(std::string cmd){
         for (int i = 0; i < elements.size(); i++)
             if (elements[i]->command == cmd)
                 return elements[i];
         
         return NULL;
     }
-    
-    
 };

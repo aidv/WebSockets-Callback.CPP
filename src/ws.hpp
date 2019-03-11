@@ -33,19 +33,27 @@ using tcp = boost::asio::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
 
 
 // Echoes back all received WebSocket messages
-class ws_session : public std::enable_shared_from_this<ws_session>{
+class server_session : public std::enable_shared_from_this<server_session>{
     websocket::stream<beast::tcp_stream> ws_;
     beast::multi_buffer buffer_;
 public:
-    WebSockets_Callback_Options options;
+    WSCB_Options* options;
+    uint64_t sessionID;
+    std::vector<std::string>* outputMessageQueue;
+    bool writing = false;
+    bool waiting = false;
     
     // Take ownership of the socket
-    explicit ws_session(tcp::socket&& socket) : ws_(std::move(socket)){}
+    explicit server_session(tcp::socket&& socket) : ws_(std::move(socket)){}
     
     // Start the asynchronous operation
-    void run(WebSockets_Callback_Options options){
+    void run(WSCB_Options* options){
+        sessionID = (uint64_t)std::time(nullptr);
+        
         //cout << "\n" << "ws_session.run()";
         this->options = options;
+        
+        outputMessageQueue = new std::vector<std::string>();
         
         // Set suggested timeout settings for the websocket
         ws_.set_option(websocket::stream_base::suggested_settings(websocket::role_type::server));
@@ -58,84 +66,117 @@ public:
                                                          ));
         
         // Accept the websocket handshake
-        ws_.async_accept(beast::bind_front_handler(&ws_session::on_accept, shared_from_this()));
+        ws_.async_accept(beast::bind_front_handler(&server_session::on_accept, shared_from_this()));
+        
         
     }
     
     void on_accept(beast::error_code ec){
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
         
         
         //cout << "\n" << "on_accept";
         if(ec){
-            options.callbacks.triggerOnError("accept");
+            options->callbacks.triggerOnError("accept");
             return ;//fail(ec, "accept");
         }
         
-        options.callbacks.triggerOnOpen();
+        sessionID = (uint64_t)std::time(nullptr);
+        options->wsClientSessions->push_back(this);
+        
+        options->callbacks.triggerOnOpen(this);
+        
         // Read a message
-        do_read();
+        this->reset();
     }
     
-    void do_read(){
-        // Read a message into our buffer
-        //cout << "\n" <<  "Reading message...";
-        ws_.async_read(buffer_, beast::bind_front_handler( &ws_session::on_read, shared_from_this()));
+    void wait_for_read(){
+        waiting = true;
+        ws_.async_read(
+            buffer_,
+            beast::bind_front_handler(
+                &server_session::on_read,
+                shared_from_this()
+            )
+        );
+    }
+    
+    void reset(){
+        if (outputMessageQueue->size() > 0 && writing == false){
+            std::vector<std::string> q = *outputMessageQueue;
+            this->send(q[0]);
+        }
+        
+        if (waiting == false) this->wait_for_read();
     }
     
     void on_read(beast::error_code ec, std::size_t bytes_transferred){
         boost::ignore_unused(bytes_transferred);
         
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
         
-        // This indicates that the session was closed
         if(ec == websocket::error::closed){
-            options.callbacks.triggerOnClose();
+            options->callbacks.triggerOnClose();
+            
+            for (int i = 0; i < options->wsClientSessions->size(); i++){
+                std::vector<void*> sessions = *options->wsClientSessions;
+                server_session* conn_ = ((server_session*)sessions[i]);
+                if (conn_->sessionID == this->sessionID){
+                    options->wsClientSessions->erase(options->wsClientSessions->begin() + i);
+                    break;
+                }
+            }
+            
+            std::cout << "wsClientSessions->size(): " << options->wsClientSessions->size() << std::endl;
+            
+            
             return;
         }
         
         if(ec){
-            options.callbacks.triggerOnError("read");
+            options->callbacks.triggerOnError("read");
         }
         
-        // Echo the message
-        ws_.text(ws_.got_text());
-        //ws_.async_write(buffer_.data(), beast::bind_front_handler(&ws_session::on_write, shared_from_this()));
+        std::string* msg = new std::string(beast::buffers_to_string(buffer_.data()));
+        if (msg->length() > 0) options->callbacks.triggerPreOnMessage(msg, this);
         
-        std::string msg = beast::buffers_to_string(buffer_.data());
-        
-        options.callbacks.triggerPreOnMessage(msg, this);
+        buffer_.consume(buffer_.size());
+        waiting = false;
+        this->reset();
     }
     
     void on_write( beast::error_code ec, std::size_t bytes_transferred){
         boost::ignore_unused(bytes_transferred);
         
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
         
         if(ec){
-            options.callbacks.triggerOnError("write");
+            options->callbacks.triggerOnError("write");
             return;//fail(ec, "write");
         }
         
-        // Clear the buffer
-        buffer_.consume(buffer_.size());
-        
-        // Do another read
-        do_read();
+        if (outputMessageQueue->size() > 0 && writing == true){
+            outputMessageQueue->erase(outputMessageQueue->begin() + 0);
+            std::vector<std::string> q = *outputMessageQueue;
+            writing = false;
+            if (outputMessageQueue->size() > 0) this->send(q[0]);
+        } else {
+            writing = false;
+        }
     }
     
     
-    void send_str(std::string str){
-        
-        //cout << "\n" << "[WS] Sending string: " << str.c_str();
+    void send(std::string msg){
+        if (writing == true) return;
+        writing = true;
         
         this->ws_.async_write(
-                              net::buffer(str),
-                              beast::bind_front_handler(
-                                                        &ws_session::on_write,
-                                                        shared_from_this()
-                                                        )
-                              );
+            net::buffer(msg),
+            beast::bind_front_handler(
+                &server_session::on_write,
+                shared_from_this()
+            )
+        );
     }
 };
 
@@ -149,50 +190,50 @@ class ws_listener : public std::enable_shared_from_this<ws_listener>
     
     
 public:
-    WebSockets_Callback_Options options;
+    WSCB_Options* options;
     
     
     ws_listener(net::io_context& ioc, tcp::endpoint endpoint) : ioc_(ioc), acceptor_(ioc)
     {
         // Open the acceptor
         //cout << "\n" <<  "Open the acceptor";
-        acceptor_.open(endpoint.protocol(), options.callbacks.error.error);
-        if(options.callbacks.error.error){
-            options.callbacks.triggerOnError("open");
+        acceptor_.open(endpoint.protocol(), options->callbacks.error.error);
+        if(options->callbacks.error.error){
+            options->callbacks.triggerOnError("open");
             return;
         }
         
         
         // Allow address reuse
         //cout << "\n" << "Allow address reuse";
-        acceptor_.set_option(net::socket_base::reuse_address(true), options.callbacks.error.error);
-        if(options.callbacks.error.error){
-            options.callbacks.triggerOnError("set_option");
+        acceptor_.set_option(net::socket_base::reuse_address(true), options->callbacks.error.error);
+        if(options->callbacks.error.error){
+            options->callbacks.triggerOnError("set_option");
             return;
         }
         
         // Bind to the server address
         //cout << "\n" <<  "Bind to the server address";
-        acceptor_.bind(endpoint, options.callbacks.error.error);
-        if(options.callbacks.error.error){
-            options.callbacks.triggerOnError("bind");
+        acceptor_.bind(endpoint, options->callbacks.error.error);
+        if(options->callbacks.error.error){
+            options->callbacks.triggerOnError("bind");
             return;
         }
         
         // Start listening for connections
         //cout << "\n" <<  "Start listening for connections";
-        acceptor_.listen(net::socket_base::max_listen_connections, options.callbacks.error.error);
-        if(options.callbacks.error.error){
-            options.callbacks.triggerOnError("listen");
+        acceptor_.listen(net::socket_base::max_listen_connections, options->callbacks.error.error);
+        if(options->callbacks.error.error){
+            options->callbacks.triggerOnError("listen");
             return;
         }
-        options.callbacks.triggerOnListening();
+        options->callbacks.triggerOnListening();
     }
     
     
     
     // Start accepting incoming connections
-    void run(WebSockets_Callback_Options options){
+    void run(WSCB_Options* options){
         
         this->options = options;
         
@@ -200,7 +241,7 @@ public:
         
         if(! acceptor_.is_open()){
             //cout << "\n" <<  "already open!";
-            options.callbacks.triggerOnError("already open");
+            options->callbacks.triggerOnError("already open");
             return;
         }
         do_accept();
@@ -218,7 +259,7 @@ public:
     
     void on_accept(beast::error_code ec, tcp::socket socket)
     {
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
         
         
         //cout << "\n" <<  "on_accept";
@@ -226,13 +267,14 @@ public:
         {
             //cout << "\n" <<  "on_accept: error";
            ;//fail(ec, "accept");
-            options.callbacks.triggerOnError("accept");
+            options->callbacks.triggerOnError("accept");
         }
         else
         {
             //cout << "\n" <<  "on_accept: ok";
             // Create the session and run it
-            std::make_shared<ws_session>(std::move(socket))->run(options);
+            std::make_shared<server_session>(std::move(socket))->run(options);
+            
         }
         
         // Accept another connection
@@ -249,7 +291,10 @@ class ws_client_session : public std::enable_shared_from_this<ws_client_session>
     websocket::stream<beast::tcp_stream> ws_;
     beast::multi_buffer buffer_;
 public:
-    WebSockets_Callback_Options options;
+    WSCB_Options* options;
+    std::vector<std::string>* outputMessageQueue;
+    bool writing = false;
+    bool waiting = false;
     
     // Resolver and socket require an io_context
     explicit
@@ -262,12 +307,15 @@ public:
     
     
     // Start the asynchronous operation
-    void run(WebSockets_Callback_Options options){
+    void run(WSCB_Options* options){
         this->options = options;
+        outputMessageQueue = new std::vector<std::string>();
+        options->clientSession = this;
         
         
-        const char* host = options.address.c_str();
-        const char* port = std::to_string(options.port).c_str();
+        
+        const char* host = options->address.c_str();
+        const char* port = std::to_string(options->port).c_str();
         
         resolver_.async_resolve(
             host,
@@ -283,9 +331,9 @@ public:
     void on_resolve(beast::error_code ec, tcp::resolver::results_type results){
         //cout << "\n" <<  "======== on_resolve()";
         
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
         if(ec){
-            options.callbacks.triggerOnError("resolve");
+            options->callbacks.triggerOnError("resolve");
             return;//fail(ec, "resolve");
         }
         
@@ -300,14 +348,13 @@ public:
                                       shared_from_this()
             )
         );
-        
     }
     
     void on_connect(beast::error_code ec, tcp::resolver::results_type::endpoint_type){
         //cout << "\n" <<  "======== on_connect()";
         
         if(ec){
-            options.callbacks.triggerOnError("connect");
+            options->callbacks.triggerOnError("connect");
             return;//fail(ec, "connect");
         }
         
@@ -328,7 +375,7 @@ public:
                                                          }));
         
         // Perform the websocket handshake
-        ws_.async_handshake(options.address, "/", beast::bind_front_handler( &ws_client_session::on_handshake, shared_from_this()));
+        ws_.async_handshake(options->address, "/", beast::bind_front_handler( &ws_client_session::on_handshake, shared_from_this()));
         
         
     }
@@ -336,95 +383,97 @@ public:
     void on_handshake(beast::error_code ec){
         //cout << "\n" <<  "======== on_handshake()";
         
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
         
         if(ec){
-            options.callbacks.triggerOnError("handshake");
+            options->callbacks.triggerOnError("handshake");
             return;//fail(ec, "handshake");
         }
         
-        options.callbacks.onOpen();
+        options->callbacks.triggerOnOpen();
         
         this->reset();
     }
     
-    void on_write(beast::error_code ec, std::size_t bytes_transferred){
-        //cout << "\n" <<  "======== on_write()";
-        
-        boost::ignore_unused(bytes_transferred);
-        
-        options.callbacks.error.error = ec;
-        if(ec){
-            options.callbacks.triggerOnError("write");
-            return;//fail(ec, "write");
-        }
-        
-        
-    }
+    
     
     
     void wait_for_read(){
-        
-        
-        //cout << "\n" <<  "Waiting for message...";
+        waiting = true;
         ws_.async_read(
-                      buffer_,
-                      beast::bind_front_handler(
-                                                &ws_client_session::on_read,
-                                                shared_from_this()));
+            buffer_,
+            beast::bind_front_handler(
+                &ws_client_session::on_read,
+                shared_from_this()
+            )
+        );
     }
     
     void reset(){
-        if (options.strQueue->size() > 0){
-            for (int i = options.strQueue->size() - 1; i > -1; i--){
-                std::vector<std::string> q = *options.strQueue;
-                this->send_str(q[i]);
-                options.strQueue->erase(options.strQueue->begin() + i);
-            }
+        if (outputMessageQueue->size() > 0 && writing == false){
+            std::vector<std::string> q = *outputMessageQueue;
+            this->send(q[0]);
         }
         
-        this->wait_for_read();
+        if (waiting == false) this->wait_for_read();
     }
     
     void on_read(beast::error_code ec, std::size_t bytes_transferred){
-        //cout << "\n" <<  "======= on_read()";
-        
-        
         boost::ignore_unused(bytes_transferred);
         
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
+        
         if(ec){
-            options.callbacks.triggerOnError("read");
+            options->callbacks.triggerOnError("read");
             return;//fail(ec, "read");
         }
         
-        //cout << "\n" <<  "Message receveived! Calling preOnMessage()...";
-        std::string msg = beast::buffers_to_string(buffer_.data());
-        options.callbacks.triggerPreOnMessage(msg, this);
+        std::string* msg = new std::string(beast::buffers_to_string(buffer_.data()));
+        options->callbacks.triggerPreOnMessage(msg, NULL);
         
-        
-        
-        //cout << "\n" <<  "Clearing buffer...";
         buffer_.consume(buffer_.size());
+        waiting = false;
         this->reset();
     }
     
     void on_close(beast::error_code ec){
         //cout << "\n" <<  "======= on_close()";
-        options.callbacks.error.error = ec;
+        options->callbacks.error.error = ec;
         if(ec){
-            options.callbacks.triggerOnError("close");
+            options->callbacks.triggerOnError("close");
             return;//fail(ec, "close");
         }
         
-        options.callbacks.triggerOnClose();
+        options->callbacks.triggerOnClose();
     }
     
-    void send_str(std::string str){
-        //cout << "\n" << "[WS CLIENT] Sending: ", str.c_str();
+    
+    void on_write(beast::error_code ec, std::size_t bytes_transferred){
+        boost::ignore_unused(bytes_transferred);
+        
+        options->callbacks.error.error = ec;
+        
+        if(ec){
+            options->callbacks.triggerOnError("write");
+            return;
+        }
+        
+        if (outputMessageQueue->size() > 0 && writing == true){
+            outputMessageQueue->erase(outputMessageQueue->begin() + 0);
+            std::vector<std::string> q = *outputMessageQueue;
+            writing = false;
+            if (outputMessageQueue->size() > 0) this->send(q[0]);
+        } else {
+            writing = false;
+        }
+    }
+    
+    void send(std::string msg){
+        if (writing == true) return;
+        writing = true;
         
         this->ws_.async_write(
-            net::buffer(str),
+            net::buffer(msg),
             beast::bind_front_handler(
                 &ws_client_session::on_write,
                 shared_from_this()
